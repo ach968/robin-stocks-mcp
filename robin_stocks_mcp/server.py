@@ -181,7 +181,25 @@ async def list_tools() -> List[Tool]:
                     "symbol": {"type": "string", "description": "Stock symbol"},
                     "expiration_date": {
                         "type": "string",
-                        "description": "Expiration date (YYYY-MM-DD). If not provided, uses nearest expiration.",
+                        "description": (
+                            "Expiration date (YYYY-MM-DD). "
+                            "If not provided, uses nearest."
+                        ),
+                    },
+                    "option_type": {
+                        "type": "string",
+                        "enum": ["call", "put"],
+                        "description": (
+                            "Filter by option type: 'call' or 'put'. "
+                            "Recommended to reduce response time."
+                        ),
+                    },
+                    "strike_price": {
+                        "type": "string",
+                        "description": (
+                            "Specific strike price. Returns only "
+                            "contracts at this strike with greeks."
+                        ),
                     },
                 },
                 "required": ["symbol"],
@@ -293,7 +311,15 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
         elif name == "robinhood.options.chain":
             symbol = arguments["symbol"]
             expiration_date = arguments.get("expiration_date")
-            contracts = options_service.get_options_chain(symbol, expiration_date)
+            option_type = arguments.get("option_type")
+            strike_price = arguments.get("strike_price")
+            contracts = await asyncio.to_thread(
+                options_service.get_options_chain,
+                symbol,
+                expiration_date,
+                option_type,
+                strike_price,
+            )
             return [
                 TextContent(
                     type="text", text=json.dumps([c.model_dump() for c in contracts])
