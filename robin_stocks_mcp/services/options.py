@@ -17,7 +17,23 @@ logger = logging.getLogger(__name__)
 
 
 class OptionsService:
-    """Service for options operations."""
+    """Service for options operations.
+
+    Uses two strategies to keep response times within MCP timeout limits:
+
+    1. **Chain listing** (no strike_price): ``find_tradable_options`` makes a
+       single paginated API call to Robinhood.  This is fast but returns only
+       instrument data (strike, type, expiration) — no bid/ask or greeks.
+
+    2. **Targeted lookup** (strike_price provided): ``get_option_market_data``
+       returns full market data (bid/ask, greeks, profitability) for the
+       specific (symbol, expiration, strike, type) combination.
+
+    The slow ``find_options_by_expiration`` helper is intentionally avoided
+    because it makes one HTTP request *per contract* to fetch market data,
+    which easily exceeds the 60-second MCP timeout for chains with many
+    strikes.
+    """
 
     def __init__(self, client: RobinhoodClient):
         self.client = client
@@ -34,11 +50,11 @@ class OptionsService:
 
     @staticmethod
     def _build_contract(item: dict, symbol: str, expiration: str) -> OptionContract:
-        """Build an OptionContract from a robin_stocks option dict.
+        """Build an OptionContract from a robin_stocks dict.
 
-        The ``item`` dict is expected to come from robin_stocks helpers such as
-        ``find_options_by_expiration`` which merge instrument data with market
-        data (greeks, bid/ask, volume, etc.).
+        Works with both instrument data (from ``find_tradable_options``)
+        and market data (from ``get_option_market_data``).  Missing keys
+        simply resolve to ``None`` thanks to ``.get()``.
         """
         return OptionContract(
             symbol=item.get("chain_symbol", symbol),
@@ -47,7 +63,7 @@ class OptionsService:
             type="call" if item.get("type") == "call" else "put",
             bid=item.get("bid_price"),
             ask=item.get("ask_price"),
-            mark_price=item.get("adjusted_mark_price") or item.get("mark_price"),
+            mark_price=(item.get("adjusted_mark_price") or item.get("mark_price")),
             last_trade_price=item.get("last_trade_price"),
             open_interest=item.get("open_interest"),
             volume=item.get("volume"),
@@ -72,10 +88,11 @@ class OptionsService:
 
         Args:
             symbol: Stock ticker symbol.
-            expiration_date: Expiration date (YYYY-MM-DD). Uses nearest if not provided.
-            option_type: 'call' or 'put'. Filters to one side of the chain.
-            strike_price: Specific strike price to look up. When provided,
-                          returns 1-2 contracts with full market data (greeks).
+            expiration_date: YYYY-MM-DD. Uses nearest if omitted.
+            option_type: ``'call'`` or ``'put'``.
+            strike_price: Specific strike price. When provided,
+                returns 1-2 contracts with full greeks via
+                ``get_option_market_data``.
         """
         if not symbol:
             raise InvalidArgumentError("Symbol is required")
@@ -93,99 +110,119 @@ class OptionsService:
                     return []
                 expiration_date = str(expirations[0])
 
-            exp = str(expiration_date)  # guaranteed non-None str from here
+            exp = str(expiration_date)
 
-            # Targeted lookup: specific strike + expiration (fast, includes greeks)
+            # --- Targeted lookup (strike_price provided) ---
+            # Uses get_option_market_data for full greeks.
             if strike_price:
-                options_data = rh.find_options_by_expiration_and_strike(
-                    symbol,
-                    expirationDate=exp,
-                    strikePrice=str(strike_price),
-                    optionType=option_type,
-                )
-                contracts: List[OptionContract] = []
-                if not options_data:
-                    return contracts
-                for item in options_data:
-                    if not item or not isinstance(item, dict):
-                        continue
-                    contracts.append(self._build_contract(item, symbol, exp))
-                return contracts
+                return self._targeted_lookup(symbol, exp, strike_price, option_type)
 
-            # Chain lookup: all strikes for an expiration
-            # find_options_by_expiration fetches market data per-contract (slow
-            # for large chains). To keep response times reasonable we:
-            # 1. Always pass optionType to halve the contracts
-            # 2. Filter to near-the-money strikes (±20% of current price)
-            options_data = rh.find_options_by_expiration(
-                symbol,
-                expirationDate=exp,
-                optionType=option_type,
-            )
+            # --- Chain listing (no strike_price) ---
+            # Uses find_tradable_options (single paginated call).
+            return self._chain_listing(symbol, exp, option_type)
 
-            if not options_data:
-                return []
-
-            # Near-the-money filtering
-            current_price = self._get_current_price(symbol)
-
-            contracts = []
-            for item in options_data:
-                if not item or not isinstance(item, dict):
-                    continue
-
-                # Filter to near-the-money if we have a current price
-                if current_price:
-                    try:
-                        strike_val = float(item.get("strike_price", 0))
-                        lower = current_price * 0.80
-                        upper = current_price * 1.20
-                        if strike_val < lower or strike_val > upper:
-                            continue
-                    except (ValueError, TypeError):
-                        pass
-
-                contracts.append(self._build_contract(item, symbol, exp))
-
-            return contracts
-
-            # Chain lookup: all strikes for an expiration
-            # find_options_by_expiration fetches market data per-contract (slow
-            # for large chains). To keep response times reasonable we:
-            # 1. Always pass optionType to halve the contracts
-            # 2. Filter to near-the-money strikes (±20% of current price)
-            options_data = rh.find_options_by_expiration(
-                symbol,
-                expirationDate=expiration_date,
-                optionType=option_type,
-            )
-
-            # Near-the-money filtering
-            current_price = self._get_current_price(symbol)
-
-            contracts = []
-            for item in options_data:
-                if item is None:
-                    continue
-
-                # Filter to near-the-money if we have a current price
-                if current_price:
-                    try:
-                        strike = float(item.get("strike_price", 0))
-                        lower = current_price * 0.80
-                        upper = current_price * 1.20
-                        if strike < lower or strike > upper:
-                            continue
-                    except (ValueError, TypeError):
-                        pass
-
-                contracts.append(self._build_contract(item, symbol, expiration_date))
-
-            return contracts
-
-        except (RobinhoodAPIError, InvalidArgumentError, AuthRequiredError):
+        except (
+            RobinhoodAPIError,
+            InvalidArgumentError,
+            AuthRequiredError,
+        ):
             raise
-        except (requests.RequestException, ConnectionError, TimeoutError) as e:
+        except (
+            requests.RequestException,
+            ConnectionError,
+            TimeoutError,
+        ) as e:
             raise RobinhoodAPIError(f"Failed to fetch options chain: {e}") from e
         except Exception as e:
             raise RobinhoodAPIError(f"Failed to fetch options chain: {e}") from e
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _targeted_lookup(
+        self,
+        symbol: str,
+        exp: str,
+        strike_price: str,
+        option_type: Optional[str],
+    ) -> List[OptionContract]:
+        """Fetch market data for a specific strike.
+
+        If ``option_type`` is given, returns one contract.
+        Otherwise returns both call and put at that strike.
+        """
+        contracts: List[OptionContract] = []
+
+        types_to_fetch: List[str] = [option_type] if option_type else ["call", "put"]
+
+        for ot in types_to_fetch:
+            md = rh.get_option_market_data(
+                symbol,
+                expirationDate=exp,
+                strikePrice=str(strike_price),
+                optionType=ot,
+            )
+            if not md:
+                continue
+            # get_option_market_data returns a list of
+            # [list-of-dicts] (one list per symbol).
+            for entry in md:
+                if not entry:
+                    continue
+                # entry is itself a list (one per symbol)
+                items = entry if isinstance(entry, list) else [entry]
+                for item in items:
+                    if not item or not isinstance(item, dict):
+                        continue
+                    # Market data doesn't include type/strike
+                    # directly — inject them.
+                    item.setdefault("type", ot)
+                    item.setdefault("strike_price", strike_price)
+                    item.setdefault("expiration_date", exp)
+                    contracts.append(self._build_contract(item, symbol, exp))
+
+        return contracts
+
+    def _chain_listing(
+        self,
+        symbol: str,
+        exp: str,
+        option_type: Optional[str],
+    ) -> List[OptionContract]:
+        """List strikes for an expiration (no greeks).
+
+        Uses ``find_tradable_options`` which is a single paginated
+        API call — fast even for large chains.  Results are filtered
+        to near-the-money (±20% of current price) when possible.
+        """
+        options_data = rh.find_tradable_options(
+            symbol,
+            expirationDate=exp,
+            optionType=option_type,
+        )
+
+        if not options_data:
+            return []
+
+        # Near-the-money filtering
+        current_price = self._get_current_price(symbol)
+
+        contracts: List[OptionContract] = []
+        for item in options_data:
+            if not item or not isinstance(item, dict):
+                continue
+
+            if current_price:
+                try:
+                    strike_val = float(item.get("strike_price", 0))
+                    lower = current_price * 0.80
+                    upper = current_price * 1.20
+                    if strike_val < lower or strike_val > upper:
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
+            contracts.append(self._build_contract(item, symbol, exp))
+
+        return contracts
