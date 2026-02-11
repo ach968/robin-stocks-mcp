@@ -1,9 +1,14 @@
 # robin_stocks_mcp/services/options.py
 from typing import List, Optional
+import requests
 import robin_stocks.robinhood as rh
 from robin_stocks_mcp.models import OptionContract
 from robin_stocks_mcp.robinhood.client import RobinhoodClient
-from robin_stocks_mcp.robinhood.errors import InvalidArgumentError, RobinhoodAPIError
+from robin_stocks_mcp.robinhood.errors import (
+    AuthRequiredError,
+    InvalidArgumentError,
+    RobinhoodAPIError,
+)
 
 
 class OptionsService:
@@ -51,5 +56,9 @@ class OptionsService:
                     contracts.append(contract)
 
             return contracts
+        except (RobinhoodAPIError, InvalidArgumentError, AuthRequiredError):
+            raise
+        except (requests.RequestException, ConnectionError, TimeoutError) as e:
+            raise RobinhoodAPIError(f"Failed to fetch options chain: {e}") from e
         except Exception as e:
-            raise RobinhoodAPIError(f"Failed to fetch options chain: {e}")
+            raise RobinhoodAPIError(f"Failed to fetch options chain: {e}") from e

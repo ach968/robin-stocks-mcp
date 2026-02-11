@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """MCP server for Robinhood API."""
 
+import argparse
 import asyncio
 import json
-from typing import List
+import logging
+from typing import List, Optional
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -25,17 +27,76 @@ from robin_stocks_mcp.services import (
     FundamentalsService,
 )
 
-# Initialize client and services
-client = RobinhoodClient()
-market_service = MarketDataService(client)
-options_service = OptionsService(client)
-portfolio_service = PortfolioService(client)
-watchlists_service = WatchlistsService(client)
-news_service = NewsService(client)
-fundamentals_service = FundamentalsService(client)
+# Module-level references initialized by _init_services() before any tool call.
+# Using TYPE_CHECKING guard so the type checker sees the concrete types.
+client: RobinhoodClient  # type: ignore[assignment]
+market_service: MarketDataService  # type: ignore[assignment]
+options_service: OptionsService  # type: ignore[assignment]
+portfolio_service: PortfolioService  # type: ignore[assignment]
+watchlists_service: WatchlistsService  # type: ignore[assignment]
+news_service: NewsService  # type: ignore[assignment]
+fundamentals_service: FundamentalsService  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
 
 # Create MCP server
 mcp = Server("robinhood-mcp")
+
+
+def _init_services(
+    username: Optional[str] = None,
+    password: Optional[str] = None,
+    session_path: Optional[str] = None,
+    allow_mfa: Optional[bool] = None,
+):
+    """Initialize client and services. Args override env vars."""
+    global client, market_service, options_service, portfolio_service
+    global watchlists_service, news_service, fundamentals_service
+
+    client = RobinhoodClient(
+        username=username,
+        password=password,
+        session_path=session_path,
+        allow_mfa=allow_mfa,
+    )
+    market_service = MarketDataService(client)
+    options_service = OptionsService(client)
+    portfolio_service = PortfolioService(client)
+    watchlists_service = WatchlistsService(client)
+    news_service = NewsService(client)
+    fundamentals_service = FundamentalsService(client)
+
+
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    """Parse CLI arguments. Args take priority over env vars."""
+    parser = argparse.ArgumentParser(
+        description="Robinhood MCP Server - read-only access to Robinhood API"
+    )
+    parser.add_argument(
+        "--username",
+        type=str,
+        default=None,
+        help="Robinhood username (overrides RH_USERNAME env var)",
+    )
+    parser.add_argument(
+        "--password",
+        type=str,
+        default=None,
+        help="Robinhood password (overrides RH_PASSWORD env var)",
+    )
+    parser.add_argument(
+        "--session-path",
+        type=str,
+        default=None,
+        help="Path to session cache file (overrides RH_SESSION_PATH env var)",
+    )
+    parser.add_argument(
+        "--allow-mfa",
+        action="store_true",
+        default=None,
+        help="Enable MFA fallback (overrides RH_ALLOW_MFA env var)",
+    )
+    return parser.parse_args(argv)
 
 
 @mcp.list_tools()
@@ -71,7 +132,7 @@ async def list_tools() -> List[Tool]:
                         "type": "string",
                         "enum": ["5minute", "10minute", "hour", "day", "week"],
                         "description": "Data interval",
-                        "default": "day",
+                        "default": "hour",
                     },
                     "span": {
                         "type": "string",
@@ -82,14 +143,13 @@ async def list_tools() -> List[Tool]:
                             "3month",
                             "year",
                             "5year",
-                            "all",
                         ],
                         "description": "Time span",
-                        "default": "year",
+                        "default": "week",
                     },
                     "bounds": {
                         "type": "string",
-                        "enum": ["extended", "trading", "regular", "24_7"],
+                        "enum": ["extended", "trading", "regular"],
                         "description": "Trading bounds",
                         "default": "regular",
                     },
@@ -153,15 +213,16 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="robinhood.news.latest",
-            description="Get latest news",
+            description="Get latest news for a stock symbol",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "symbol": {
                         "type": "string",
-                        "description": "Optional symbol to filter news",
+                        "description": "Stock symbol to get news for (e.g., 'AAPL')",
                     }
                 },
+                "required": ["symbol"],
             },
         ),
         Tool(
@@ -186,6 +247,16 @@ async def list_tools() -> List[Tool]:
 @mcp.call_tool()
 async def call_tool(name: str, arguments: dict) -> List[TextContent]:
     """Handle tool calls."""
+    assert client is not None, "Services not initialized. Call _init_services() first."
+    assert market_service is not None
+    assert options_service is not None
+    assert portfolio_service is not None
+    assert watchlists_service is not None
+    assert news_service is not None
+    assert fundamentals_service is not None
+
+    logger.debug("Tool called: %s", name)
+
     try:
         if name == "robinhood.market.current_price":
             symbols = arguments.get("symbols", [])
@@ -197,9 +268,9 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
             ]
 
         elif name == "robinhood.market.price_history":
-            symbol = arguments.get("symbol")
-            interval = arguments.get("interval", "day")
-            span = arguments.get("span", "year")
+            symbol = arguments["symbol"]
+            interval = arguments.get("interval", "hour")
+            span = arguments.get("span", "week")
             bounds = arguments.get("bounds", "regular")
             candles = market_service.get_price_history(symbol, interval, span, bounds)
             return [
@@ -220,7 +291,7 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
             ]
 
         elif name == "robinhood.options.chain":
-            symbol = arguments.get("symbol")
+            symbol = arguments["symbol"]
             expiration_date = arguments.get("expiration_date")
             contracts = options_service.get_options_chain(symbol, expiration_date)
             return [
@@ -251,7 +322,7 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
             ]
 
         elif name == "robinhood.news.latest":
-            symbol = arguments.get("symbol")
+            symbol = arguments["symbol"]
             news = news_service.get_news(symbol)
             return [
                 TextContent(
@@ -260,7 +331,7 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
             ]
 
         elif name == "robinhood.fundamentals.get":
-            symbol = arguments.get("symbol")
+            symbol = arguments["symbol"]
             fundamentals = fundamentals_service.get_fundamentals(symbol)
             return [
                 TextContent(type="text", text=json.dumps(fundamentals.model_dump()))
@@ -290,36 +361,53 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
             ]
 
     except AuthRequiredError as e:
+        logger.warning("Tool %s failed: AUTH_REQUIRED: %s", name, e)
         return [
             TextContent(type="text", text=json.dumps({"error": f"AUTH_REQUIRED: {e}"}))
         ]
     except InvalidArgumentError as e:
+        logger.warning("Tool %s failed: INVALID_ARGUMENT: %s", name, e)
         return [
             TextContent(
                 type="text", text=json.dumps({"error": f"INVALID_ARGUMENT: {e}"})
             )
         ]
     except RobinhoodAPIError as e:
+        logger.warning("Tool %s failed: ROBINHOOD_ERROR: %s", name, e)
         return [
             TextContent(
                 type="text", text=json.dumps({"error": f"ROBINHOOD_ERROR: {e}"})
             )
         ]
     except NetworkError as e:
+        logger.warning("Tool %s failed: NETWORK_ERROR: %s", name, e)
         return [
             TextContent(type="text", text=json.dumps({"error": f"NETWORK_ERROR: {e}"}))
         ]
     except Exception as e:
+        logger.warning("Tool %s failed: INTERNAL_ERROR: %s", name, e)
         return [
             TextContent(type="text", text=json.dumps({"error": f"INTERNAL_ERROR: {e}"}))
         ]
 
 
-async def main():
-    """Run the MCP server."""
+async def run_server():
+    """Run the MCP server over stdio."""
     async with stdio_server() as (read_stream, write_stream):
         await mcp.run(read_stream, write_stream, mcp.create_initialization_options())
 
 
+def main():
+    """Entry point: parse args, init services, start server."""
+    args = parse_args()
+    _init_services(
+        username=args.username,
+        password=args.password,
+        session_path=args.session_path,
+        allow_mfa=args.allow_mfa,
+    )
+    asyncio.run(run_server())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

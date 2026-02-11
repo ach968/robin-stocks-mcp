@@ -1,8 +1,13 @@
 # robin_stocks_mcp/services/fundamentals.py
+import requests
 import robin_stocks.robinhood as rh
 from robin_stocks_mcp.models import Fundamentals
 from robin_stocks_mcp.robinhood.client import RobinhoodClient
-from robin_stocks_mcp.robinhood.errors import InvalidArgumentError, RobinhoodAPIError
+from robin_stocks_mcp.robinhood.errors import (
+    AuthRequiredError,
+    InvalidArgumentError,
+    RobinhoodAPIError,
+)
 
 
 class FundamentalsService:
@@ -34,5 +39,9 @@ class FundamentalsService:
                 week_52_high=data.get("high_52_weeks"),
                 week_52_low=data.get("low_52_weeks"),
             )
+        except (RobinhoodAPIError, InvalidArgumentError, AuthRequiredError):
+            raise
+        except (requests.RequestException, ConnectionError, TimeoutError) as e:
+            raise RobinhoodAPIError(f"Failed to fetch fundamentals: {e}") from e
         except Exception as e:
-            raise RobinhoodAPIError(f"Failed to fetch fundamentals: {e}")
+            raise RobinhoodAPIError(f"Failed to fetch fundamentals: {e}") from e

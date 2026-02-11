@@ -75,7 +75,6 @@ def test_market_service_with_multiple_quotes():
                 "ask_price": "150.55",
                 "updated_at": "2026-02-11T10:00:00Z",
                 "previous_close": "149.00",
-                "change_percent": "1.00",
             },
             {
                 "symbol": "GOOGL",
@@ -92,9 +91,14 @@ def test_market_service_with_multiple_quotes():
         assert quotes[0].symbol == "AAPL"
         assert quotes[0].last_price == 150.50
         assert quotes[0].previous_close == 149.00
-        assert quotes[0].change_percent == 1.00
+        # change_percent is now computed: ((150.50 - 149.00) / 149.00) * 100
+        import pytest
+
+        expected_change = ((150.50 - 149.00) / 149.00) * 100
+        assert quotes[0].change_percent == pytest.approx(expected_change)
         assert quotes[1].symbol == "GOOGL"
         assert quotes[1].last_price == 2800.00
+        assert quotes[1].change_percent is None  # no previous_close provided
 
 
 def test_market_service_with_single_symbol():

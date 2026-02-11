@@ -21,6 +21,63 @@ def test_server_has_call_tool():
     assert hasattr(mcp, "call_tool")
 
 
+def test_parse_args_defaults():
+    from robin_stocks_mcp.server import parse_args
+
+    args = parse_args([])
+    assert args.username is None
+    assert args.password is None
+    assert args.session_path is None
+    assert args.allow_mfa is None
+
+
+def test_parse_args_with_values():
+    from robin_stocks_mcp.server import parse_args
+
+    args = parse_args([
+        "--username", "myuser",
+        "--password", "mypass",
+        "--session-path", "/tmp/session.json",
+        "--allow-mfa",
+    ])
+    assert args.username == "myuser"
+    assert args.password == "mypass"
+    assert args.session_path == "/tmp/session.json"
+    assert args.allow_mfa is True
+
+
+def test_init_services_creates_all_services():
+    from robin_stocks_mcp.server import _init_services
+    import robin_stocks_mcp.server as srv
+
+    _init_services(username="u", password="p")
+    assert srv.client is not None
+    assert srv.market_service is not None
+    assert srv.options_service is not None
+    assert srv.portfolio_service is not None
+    assert srv.watchlists_service is not None
+    assert srv.news_service is not None
+    assert srv.fundamentals_service is not None
+    assert srv.client._username == "u"
+    assert srv.client._password == "p"
+
+
+def test_init_services_passes_all_args():
+    from robin_stocks_mcp.server import _init_services
+    import robin_stocks_mcp.server as srv
+
+    _init_services(
+        username="u",
+        password="p",
+        session_path="/tmp/s.json",
+        allow_mfa=True,
+    )
+    assert srv.client._username == "u"
+    assert srv.client._password == "p"
+    assert srv.client._session_path == "/tmp/s.json"
+    assert srv.client._allow_mfa is True
+
+
 @pytest.mark.asyncio
 async def test_list_tools_returns_tools():
     from robin_stocks_mcp.server import list_tools

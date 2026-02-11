@@ -33,7 +33,6 @@ def test_get_current_price_single_symbol(mock_rh):
         "ask_price": "150.55",
         "updated_at": "2026-02-11T10:00:00Z",
         "previous_close": "149.00",
-        "change_percent": "1.01",
     }
 
     quotes = service.get_current_price(["AAPL"])
@@ -43,6 +42,9 @@ def test_get_current_price_single_symbol(mock_rh):
     assert quotes[0].last_price == 150.50
     assert quotes[0].bid == 150.45
     assert quotes[0].ask == 150.55
+    # change_percent is computed: ((150.50 - 149.00) / 149.00) * 100
+    expected_change = ((150.50 - 149.00) / 149.00) * 100
+    assert quotes[0].change_percent == pytest.approx(expected_change)
     mock_client.ensure_session.assert_called_once()
 
 
@@ -69,6 +71,24 @@ def test_get_current_price_multiple_symbols(mock_rh):
     assert len(quotes) == 2
     assert quotes[0].symbol == "AAPL"
     assert quotes[1].symbol == "GOOGL"
+
+
+@patch("robin_stocks_mcp.services.market_data.rh")
+def test_get_current_price_change_percent_missing_previous_close(mock_rh):
+    """change_percent should be None when previous_close is not in the response."""
+    mock_client = MagicMock(spec=RobinhoodClient)
+    service = MarketDataService(mock_client)
+
+    mock_rh.get_quotes.return_value = {
+        "symbol": "AAPL",
+        "last_trade_price": "150.50",
+        "updated_at": "2026-02-11T10:00:00Z",
+    }
+
+    quotes = service.get_current_price(["AAPL"])
+
+    assert len(quotes) == 1
+    assert quotes[0].change_percent is None
 
 
 @patch("robin_stocks_mcp.services.market_data.rh")
@@ -121,6 +141,28 @@ def test_get_price_history_invalid_bounds():
 
     with pytest.raises(InvalidArgumentError):
         service.get_price_history("AAPL", bounds="invalid")
+
+
+def test_get_price_history_rejects_all_span():
+    """robin_stocks does not accept 'all' as a span value."""
+    mock_client = MagicMock(spec=RobinhoodClient)
+    service = MarketDataService(mock_client)
+
+    from robin_stocks_mcp.robinhood.errors import InvalidArgumentError
+
+    with pytest.raises(InvalidArgumentError):
+        service.get_price_history("AAPL", span="all")
+
+
+def test_get_price_history_rejects_24_7_bounds():
+    """robin_stocks does not accept '24_7' as a bounds value."""
+    mock_client = MagicMock(spec=RobinhoodClient)
+    service = MarketDataService(mock_client)
+
+    from robin_stocks_mcp.robinhood.errors import InvalidArgumentError
+
+    with pytest.raises(InvalidArgumentError):
+        service.get_price_history("AAPL", bounds="24_7")
 
 
 @patch("robin_stocks_mcp.services.market_data.rh")

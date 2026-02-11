@@ -1,88 +1,65 @@
 # robin_stocks_mcp/robinhood/client.py
+import logging
 import os
-import json
 from typing import Optional
 from pathlib import Path
 import robin_stocks.robinhood as rh
 from .errors import AuthRequiredError, NetworkError
 
+logger = logging.getLogger(__name__)
+
+# robin_stocks stores sessions as pickle files.
+# Default location: ~/.tokens/robinhood.pickle
+# With pickle_path: {pickle_path}/robinhood.pickle
+# With pickle_name: {pickle_path}/robinhood{pickle_name}.pickle
+_PICKLE_FILENAME = "robinhood.pickle"
+
 
 class RobinhoodClient:
-    """Manages Robinhood authentication and session state."""
+    """Manages Robinhood authentication and session state.
 
-    def __init__(self):
+    Session persistence is delegated entirely to robin_stocks, which uses
+    pickle files. When ``session_path`` is provided it is forwarded as
+    ``pickle_path`` to ``rh.login()`` so the pickle is stored in the
+    requested directory.
+
+    Args take priority over environment variables.
+    """
+
+    def __init__(
+        self,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        session_path: Optional[str] = None,
+        allow_mfa: Optional[bool] = None,
+    ):
         self._authenticated = False
-        self._username: Optional[str] = None
-        self._password: Optional[str] = None
-        self._session_path: Optional[str] = None
-        self._allow_mfa: bool = False
-        self._load_config()
-
-    def _load_config(self):
-        """Load configuration from environment."""
-        self._username = os.getenv("RH_USERNAME")
-        self._password = os.getenv("RH_PASSWORD")
-        self._session_path = os.getenv("RH_SESSION_PATH")
-        self._allow_mfa = os.getenv("RH_ALLOW_MFA", "0") == "1"
-
-    def _load_session(self) -> bool:
-        """Load cached session if available."""
-        if not self._session_path:
-            return False
-
-        session_file = Path(self._session_path)
-        if not session_file.exists():
-            return False
-
-        try:
-            with open(session_file, "r") as f:
-                json.load(f)  # Validate JSON is readable
-            # Try to use the session token
-            # robin_stocks stores session internally, we just check if it's valid
-            return self._is_session_valid()
-        except Exception:
-            return False
-
-    def _save_session(self):
-        """Save current session to disk."""
-        if not self._session_path:
-            return
-
-        try:
-            session_file = Path(self._session_path)
-            session_file.parent.mkdir(parents=True, exist_ok=True)
-            # robin_stocks manages the session internally
-            # We just track that we have one
-            with open(session_file, "w") as f:
-                json.dump({"authenticated": True}, f)
-        except Exception:
-            pass  # Don't fail if we can't save session
-
-    def _is_session_valid(self) -> bool:
-        """Check if current session is valid."""
-        try:
-            # Try a simple API call that requires auth
-            account = rh.load_account_profile()
-            return account is not None
-        except Exception:
-            return False
+        self._username = username or os.getenv("RH_USERNAME")
+        self._password = password or os.getenv("RH_PASSWORD")
+        self._session_path = session_path or os.getenv("RH_SESSION_PATH")
+        self._allow_mfa = (
+            allow_mfa
+            if allow_mfa is not None
+            else os.getenv("RH_ALLOW_MFA", "0") == "1"
+        )
 
     def ensure_session(self, mfa_code: Optional[str] = None) -> "RobinhoodClient":
         """Ensure we have a valid session, authenticating if needed.
 
+        Delegates session caching and validation to ``robin_stocks``.
+        ``rh.login()`` will automatically restore a cached pickle session
+        (validating it against the positions endpoint) before falling back
+        to a fresh login.
+
         Raises:
             AuthRequiredError: If authentication is required but not possible.
         """
-        if self._authenticated and self._is_session_valid():
+        if self._authenticated:
+            logger.debug("Session already active, skipping login")
             return self
 
-        # Try to load cached session
-        if self._load_session() and self._is_session_valid():
-            self._authenticated = True
-            return self
-
-        # Need to authenticate
         if not self._username or not self._password:
+            logger.warning("Authentication failed: missing credentials")
             raise AuthRequiredError(
                 "Authentication required. Please set RH_USERNAME and RH_PASSWORD, "
                 "or ensure a valid session cache exists. You may need to refresh "
@@ -90,40 +67,63 @@ class RobinhoodClient:
             )
 
         try:
-            login_result = rh.login(
-                self._username,
-                self._password,
-                mfa_code=mfa_code if self._allow_mfa else None,
-                store_session=True,
+            login_kwargs: dict = {
+                "username": self._username,
+                "password": self._password,
+                "store_session": True,
+            }
+
+            if self._session_path:
+                login_kwargs["pickle_path"] = self._session_path
+
+            if self._allow_mfa and mfa_code:
+                login_kwargs["mfa_code"] = mfa_code
+
+            logger.info("Authenticating user %s", self._username)
+            logger.debug(
+                "Login kwargs: store_session=%s, pickle_path=%s, mfa=%s",
+                login_kwargs.get("store_session"),
+                login_kwargs.get("pickle_path"),
+                "provided" if login_kwargs.get("mfa_code") else "none",
             )
+            login_result = rh.login(**login_kwargs)
 
             if login_result:
                 self._authenticated = True
-                self._save_session()
+                logger.info("Authentication successful for user %s", self._username)
                 return self
             else:
+                logger.warning("Authentication failed for user %s", self._username)
                 raise AuthRequiredError(
                     "Login failed. Please check your credentials or refresh "
                     "your session in the Robinhood app."
                 )
+        except AuthRequiredError:
+            raise
         except Exception as e:
             if "challenge" in str(e).lower():
+                logger.warning("Authentication challenge required for user %s", self._username)
                 raise AuthRequiredError(
                     "Authentication challenge required. Please refresh your "
                     "session in the Robinhood app, or enable MFA fallback with "
                     "RH_ALLOW_MFA=1 and provide mfa_code."
                 )
+            logger.warning("Authentication error: %s", e)
             raise NetworkError(f"Failed to authenticate: {e}")
 
     def logout(self):
-        """Clear session."""
+        """Clear session and remove cached pickle file."""
+        logger.debug("Logging out and clearing session")
         try:
             rh.logout()
         except Exception:
             pass
         self._authenticated = False
+        # robin_stocks.logout() only clears in-memory state.
+        # Also remove the persisted pickle file so next start is clean.
         if self._session_path:
             try:
-                Path(self._session_path).unlink(missing_ok=True)
+                pickle_file = Path(self._session_path) / _PICKLE_FILENAME
+                pickle_file.unlink(missing_ok=True)
             except Exception:
                 pass

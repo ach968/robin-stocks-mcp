@@ -1,9 +1,14 @@
 # robin_stocks_mcp/services/news.py
-from typing import List, Optional
+from typing import List
+import requests
 import robin_stocks.robinhood as rh
 from robin_stocks_mcp.models import NewsItem
 from robin_stocks_mcp.robinhood.client import RobinhoodClient
-from robin_stocks_mcp.robinhood.errors import RobinhoodAPIError
+from robin_stocks_mcp.robinhood.errors import (
+    AuthRequiredError,
+    InvalidArgumentError,
+    RobinhoodAPIError,
+)
 
 
 class NewsService:
@@ -12,22 +17,29 @@ class NewsService:
     def __init__(self, client: RobinhoodClient):
         self.client = client
 
-    def get_news(self, symbol: Optional[str] = None) -> List[NewsItem]:
-        """Get news for a symbol or general news."""
+    def get_news(self, symbol: str) -> List[NewsItem]:
+        """Get news for a symbol.
+
+        :param symbol: Stock ticker symbol (required).
+        :raises InvalidArgumentError: If symbol is not provided.
+        """
+        if not symbol:
+            raise InvalidArgumentError(
+                "A stock symbol is required to fetch news."
+            )
+
         self.client.ensure_session()
 
         try:
-            if symbol:
-                news_data = rh.get_news(symbol)
-            else:
-                # Get top news
-                news_data = rh.get_top_news()
+            news_data = rh.get_news(symbol)
 
             if not news_data:
                 return []
 
             items = []
             for item in news_data:
+                if not isinstance(item, dict):
+                    continue
                 news_item = NewsItem(
                     id=item.get("uuid", ""),
                     headline=item.get("title", ""),
@@ -39,5 +51,9 @@ class NewsService:
                 items.append(news_item)
 
             return items
+        except (RobinhoodAPIError, InvalidArgumentError, AuthRequiredError):
+            raise
+        except (requests.RequestException, ConnectionError, TimeoutError) as e:
+            raise RobinhoodAPIError(f"Failed to fetch news: {e}") from e
         except Exception as e:
-            raise RobinhoodAPIError(f"Failed to fetch news: {e}")
+            raise RobinhoodAPIError(f"Failed to fetch news: {e}") from e

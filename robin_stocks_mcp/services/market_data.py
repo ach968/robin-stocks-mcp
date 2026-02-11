@@ -1,8 +1,13 @@
 from typing import List
+import requests
 import robin_stocks.robinhood as rh
 from robin_stocks_mcp.models import Quote, Candle
 from robin_stocks_mcp.robinhood.client import RobinhoodClient
-from robin_stocks_mcp.robinhood.errors import InvalidArgumentError, RobinhoodAPIError
+from robin_stocks_mcp.robinhood.errors import (
+    AuthRequiredError,
+    InvalidArgumentError,
+    RobinhoodAPIError,
+)
 
 
 class MarketDataService:
@@ -34,26 +39,44 @@ class MarketDataService:
 
             quotes = []
             for item in data:
+                # Compute change_percent from last_trade_price and previous_close
+                # since robin_stocks API does not return change_percent directly.
+                last_trade_price = item.get("last_trade_price")
+                previous_close = item.get("previous_close")
+                change_percent = None
+                if last_trade_price is not None and previous_close is not None:
+                    try:
+                        ltp = float(last_trade_price)
+                        pc = float(previous_close)
+                        if pc != 0:
+                            change_percent = ((ltp - pc) / pc) * 100
+                    except (ValueError, TypeError):
+                        change_percent = None
+
                 quote = Quote(
                     symbol=item.get("symbol", ""),
-                    last_price=item.get("last_trade_price"),
+                    last_price=last_trade_price,
                     bid=item.get("bid_price"),
                     ask=item.get("ask_price"),
                     timestamp=item.get("updated_at"),
-                    previous_close=item.get("previous_close"),
-                    change_percent=item.get("change_percent"),
+                    previous_close=previous_close,
+                    change_percent=change_percent,
                 )
                 quotes.append(quote)
 
             return quotes
+        except (RobinhoodAPIError, InvalidArgumentError, AuthRequiredError):
+            raise
+        except (requests.RequestException, ConnectionError, TimeoutError) as e:
+            raise RobinhoodAPIError(f"Failed to fetch quotes: {e}") from e
         except Exception as e:
-            raise RobinhoodAPIError(f"Failed to fetch quotes: {e}")
+            raise RobinhoodAPIError(f"Failed to fetch quotes: {e}") from e
 
     def get_price_history(
         self,
         symbol: str,
-        interval: str = "day",
-        span: str = "year",
+        interval: str = "hour",
+        span: str = "week",
         bounds: str = "regular",
     ) -> List[Candle]:
         """Get historical price data for a symbol."""
@@ -62,8 +85,8 @@ class MarketDataService:
 
         # Validate inputs
         valid_intervals = ["5minute", "10minute", "hour", "day", "week"]
-        valid_spans = ["day", "week", "month", "3month", "year", "5year", "all"]
-        valid_bounds = ["extended", "trading", "regular", "24_7"]
+        valid_spans = ["day", "week", "month", "3month", "year", "5year"]
+        valid_bounds = ["extended", "trading", "regular"]
 
         if interval not in valid_intervals:
             raise InvalidArgumentError(
@@ -99,5 +122,9 @@ class MarketDataService:
                 candles.append(candle)
 
             return candles
+        except (RobinhoodAPIError, InvalidArgumentError, AuthRequiredError):
+            raise
+        except (requests.RequestException, ConnectionError, TimeoutError) as e:
+            raise RobinhoodAPIError(f"Failed to fetch price history: {e}") from e
         except Exception as e:
-            raise RobinhoodAPIError(f"Failed to fetch price history: {e}")
+            raise RobinhoodAPIError(f"Failed to fetch price history: {e}") from e
