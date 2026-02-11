@@ -1,6 +1,6 @@
 # Robinhood MCP Server
 
-A read-only MCP (Model Context Protocol) server wrapping the [robin-stocks](https://github.com/jmfernandes/robin_stocks) Robinhood API.
+A read-only MCP (Model Context Protocol) server wrapping the [robin-stocks](https://github.com/jmfernandes/robin_stocks) (unofficial) Robinhood API.
 
 ## Features
 
