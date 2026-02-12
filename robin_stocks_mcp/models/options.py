@@ -5,6 +5,30 @@ from pydantic import BaseModel, field_validator
 from .base import coerce_int, coerce_numeric
 
 
+class OptionPosition(BaseModel):
+    """A user's held option position."""
+
+    symbol: Optional[str] = None
+    expiration_date: Optional[str] = None
+    strike_price: Optional[float] = None
+    option_type: Optional[str] = None
+    direction: Optional[str] = None  # "long" or "short" (debit or credit)
+    quantity: Optional[float] = None
+    average_price: Optional[float] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+    @field_validator(
+        "strike_price",
+        "quantity",
+        "average_price",
+        mode="before",
+    )
+    @classmethod
+    def validate_numeric(cls, v):
+        return coerce_numeric(v)
+
+
 class OptionContract(BaseModel):
     symbol: str
     expiration: str

@@ -209,6 +209,11 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
+            name="robinhood.options.positions",
+            description="Get all open option positions for the account (strike, expiration, type, quantity, average price)",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        Tool(
             name="robinhood.portfolio.summary",
             description="Get portfolio summary",
             inputSchema={"type": "object", "properties": {}},
@@ -341,6 +346,16 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
             return [
                 TextContent(
                     type="text", text=json.dumps([c.model_dump() for c in contracts])
+                )
+            ]
+
+        elif name == "robinhood.options.positions":
+            positions = await asyncio.to_thread(
+                options_service.get_option_positions,
+            )
+            return [
+                TextContent(
+                    type="text", text=json.dumps([p.model_dump() for p in positions])
                 )
             ]
 

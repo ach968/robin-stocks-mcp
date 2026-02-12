@@ -5,7 +5,7 @@ from typing import List, Optional
 import requests
 import robin_stocks.robinhood as rh
 
-from robin_stocks_mcp.models import OptionContract
+from robin_stocks_mcp.models import OptionContract, OptionPosition
 from robin_stocks_mcp.robinhood.client import RobinhoodClient
 from robin_stocks_mcp.robinhood.errors import (
     AuthRequiredError,
@@ -226,3 +226,68 @@ class OptionsService:
             contracts.append(self._build_contract(item, symbol, exp))
 
         return contracts
+
+    def get_option_positions(self) -> List[OptionPosition]:
+        """Get all open option positions for the account.
+
+        Calls ``rh.get_open_option_positions()`` and resolves each
+        position's option instrument URL to extract the underlying
+        symbol, strike, expiration, and option type.
+        """
+        self.client.ensure_session()
+
+        try:
+            positions_data = rh.get_open_option_positions()
+
+            if not positions_data or positions_data == [None]:
+                return []
+
+            positions: List[OptionPosition] = []
+            for item in positions_data:
+                if not item or not isinstance(item, dict):
+                    continue
+
+                # Resolve the option instrument for strike/expiration/type
+                option_url = item.get("option")
+                symbol = item.get("chain_symbol")
+                strike_price = None
+                expiration_date = None
+                option_type = None
+
+                if option_url:
+                    try:
+                        # Extract the option ID from the URL and fetch instrument data
+                        option_id = option_url.rstrip("/").split("/")[-1]
+                        instrument = rh.get_option_instrument_data_by_id(option_id)
+                        if instrument and isinstance(instrument, dict):
+                            strike_price = instrument.get("strike_price")
+                            expiration_date = instrument.get("expiration_date")
+                            option_type = instrument.get("type")
+                            if not symbol:
+                                symbol = instrument.get("chain_symbol")
+                    except Exception:
+                        logger.debug(
+                            "Failed to resolve option instrument: %s",
+                            option_url,
+                        )
+
+                position = OptionPosition(
+                    symbol=symbol,
+                    expiration_date=expiration_date,
+                    strike_price=strike_price,
+                    option_type=option_type,
+                    direction=item.get("type"),
+                    quantity=item.get("quantity"),
+                    average_price=item.get("average_price"),
+                    created_at=item.get("created_at"),
+                    updated_at=item.get("updated_at"),
+                )
+                positions.append(position)
+
+            return positions
+        except (RobinhoodAPIError, InvalidArgumentError, AuthRequiredError):
+            raise
+        except (requests.RequestException, ConnectionError, TimeoutError) as e:
+            raise RobinhoodAPIError(f"Failed to fetch option positions: {e}") from e
+        except Exception as e:
+            raise RobinhoodAPIError(f"Failed to fetch option positions: {e}") from e

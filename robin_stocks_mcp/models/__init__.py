@@ -1,5 +1,5 @@
 from .market import Quote, Candle
-from .options import OptionContract
+from .options import OptionContract, OptionPosition
 from .portfolio import PortfolioSummary, Position
 from .watchlists import Watchlist
 from .news import NewsItem
@@ -10,6 +10,7 @@ __all__ = [
     "Quote",
     "Candle",
     "OptionContract",
+    "OptionPosition",
     "PortfolioSummary",
     "Position",
     "Watchlist",

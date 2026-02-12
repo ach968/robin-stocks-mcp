@@ -88,7 +88,7 @@ async def test_list_tools_returns_tools():
     from robin_stocks_mcp.server import list_tools
 
     tools = await list_tools()
-    assert len(tools) == 11
+    assert len(tools) == 12
 
     tool_names = [tool.name for tool in tools]
     expected_tools = [
@@ -96,6 +96,7 @@ async def test_list_tools_returns_tools():
         "robinhood.market.price_history",
         "robinhood.market.quote",
         "robinhood.options.chain",
+        "robinhood.options.positions",
         "robinhood.portfolio.summary",
         "robinhood.portfolio.positions",
         "robinhood.watchlists.list",
