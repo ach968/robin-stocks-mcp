@@ -19,7 +19,6 @@ from robin_stocks_mcp.robinhood.errors import (
     NetworkError,
 )
 from robin_stocks_mcp.services import (
-    EarningsService,
     MarketDataService,
     OptionsService,
     PortfolioService,
@@ -31,7 +30,6 @@ from robin_stocks_mcp.services import (
 # Module-level references initialized by _init_services() before any tool call.
 # Using TYPE_CHECKING guard so the type checker sees the concrete types.
 client: RobinhoodClient  # type: ignore[assignment]
-earnings_service: EarningsService  # type: ignore[assignment]
 market_service: MarketDataService  # type: ignore[assignment]
 options_service: OptionsService  # type: ignore[assignment]
 portfolio_service: PortfolioService  # type: ignore[assignment]
@@ -52,7 +50,7 @@ def _init_services(
     allow_mfa: Optional[bool] = None,
 ):
     """Initialize client and services. Args override env vars."""
-    global client, earnings_service, market_service, options_service, portfolio_service
+    global client, market_service, options_service, portfolio_service
     global watchlists_service, news_service, fundamentals_service
 
     client = RobinhoodClient(
@@ -61,7 +59,6 @@ def _init_services(
         session_path=session_path,
         allow_mfa=allow_mfa,
     )
-    earnings_service = EarningsService(client)
     market_service = MarketDataService(client)
     options_service = OptionsService(client)
     portfolio_service = PortfolioService(client)
@@ -263,20 +260,6 @@ async def list_tools() -> List[Tool]:
             },
         ),
         Tool(
-            name="robinhood.earnings.get",
-            description="Get earnings data (EPS, report dates, earnings calls) by quarter for a stock symbol",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "Stock symbol (e.g., 'AAPL')",
-                    }
-                },
-                "required": ["symbol"],
-            },
-        ),
-        Tool(
             name="robinhood.auth.status",
             description="Check authentication status",
             inputSchema={"type": "object", "properties": {}},
@@ -288,7 +271,6 @@ async def list_tools() -> List[Tool]:
 async def call_tool(name: str, arguments: dict) -> List[TextContent]:
     """Handle tool calls."""
     assert client is not None, "Services not initialized. Call _init_services() first."
-    assert earnings_service is not None
     assert market_service is not None
     assert options_service is not None
     assert portfolio_service is not None
@@ -394,15 +376,6 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
             fundamentals = fundamentals_service.get_fundamentals(symbol)
             return [
                 TextContent(type="text", text=json.dumps(fundamentals.model_dump()))
-            ]
-
-        elif name == "robinhood.earnings.get":
-            symbol = arguments["symbol"]
-            earnings = earnings_service.get_earnings(symbol)
-            return [
-                TextContent(
-                    type="text", text=json.dumps([e.model_dump() for e in earnings])
-                )
             ]
 
         elif name == "robinhood.auth.status":
