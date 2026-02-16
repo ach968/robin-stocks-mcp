@@ -19,23 +19,17 @@ from robin_stocks_mcp.robinhood.errors import (
     NetworkError,
 )
 from robin_stocks_mcp.services import (
-    MarketDataService,
     OptionsService,
     PortfolioService,
     WatchlistsService,
-    NewsService,
-    FundamentalsService,
 )
 
 # Module-level references initialized by _init_services() before any tool call.
 # Using TYPE_CHECKING guard so the type checker sees the concrete types.
 client: RobinhoodClient  # type: ignore[assignment]
-market_service: MarketDataService  # type: ignore[assignment]
 options_service: OptionsService  # type: ignore[assignment]
 portfolio_service: PortfolioService  # type: ignore[assignment]
 watchlists_service: WatchlistsService  # type: ignore[assignment]
-news_service: NewsService  # type: ignore[assignment]
-fundamentals_service: FundamentalsService  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +44,7 @@ def _init_services(
     allow_mfa: Optional[bool] = None,
 ):
     """Initialize client and services. Args override env vars."""
-    global client, market_service, options_service, portfolio_service
-    global watchlists_service, news_service, fundamentals_service
+    global client, options_service, portfolio_service, watchlists_service
 
     client = RobinhoodClient(
         username=username,
@@ -59,12 +52,9 @@ def _init_services(
         session_path=session_path,
         allow_mfa=allow_mfa,
     )
-    market_service = MarketDataService(client)
     options_service = OptionsService(client)
     portfolio_service = PortfolioService(client)
     watchlists_service = WatchlistsService(client)
-    news_service = NewsService(client)
-    fundamentals_service = FundamentalsService(client)
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -104,108 +94,6 @@ async def list_tools() -> List[Tool]:
     """List available tools."""
     return [
         Tool(
-            name="robinhood.market.current_price",
-            description="Get current price quotes for one or more symbols",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbols": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of stock symbols (e.g., ['AAPL', 'GOOGL'])",
-                    }
-                },
-                "required": ["symbols"],
-            },
-        ),
-        Tool(
-            name="robinhood.market.price_history",
-            description="Get historical price data for a symbol",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "Stock symbol (e.g., 'AAPL')",
-                    },
-                    "interval": {
-                        "type": "string",
-                        "enum": ["5minute", "10minute", "hour", "day", "week"],
-                        "description": "Data interval",
-                        "default": "hour",
-                    },
-                    "span": {
-                        "type": "string",
-                        "enum": [
-                            "day",
-                            "week",
-                            "month",
-                            "3month",
-                            "year",
-                            "5year",
-                        ],
-                        "description": "Time span",
-                        "default": "week",
-                    },
-                    "bounds": {
-                        "type": "string",
-                        "enum": ["extended", "trading", "regular"],
-                        "description": "Trading bounds",
-                        "default": "regular",
-                    },
-                },
-                "required": ["symbol"],
-            },
-        ),
-        Tool(
-            name="robinhood.market.quote",
-            description="Get detailed quotes for symbols",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbols": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of stock symbols",
-                    }
-                },
-                "required": ["symbols"],
-            },
-        ),
-        Tool(
-            name="robinhood.options.chain",
-            description="Get options chain for a symbol",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string", "description": "Stock symbol"},
-                    "expiration_date": {
-                        "type": "string",
-                        "description": (
-                            "Expiration date (YYYY-MM-DD). "
-                            "If not provided, uses nearest."
-                        ),
-                    },
-                    "option_type": {
-                        "type": "string",
-                        "enum": ["call", "put"],
-                        "description": (
-                            "Filter by option type: 'call' or 'put'. "
-                            "Recommended to reduce response time."
-                        ),
-                    },
-                    "strike_price": {
-                        "type": "string",
-                        "description": (
-                            "Specific strike price. Returns only "
-                            "contracts at this strike with greeks."
-                        ),
-                    },
-                },
-                "required": ["symbol"],
-            },
-        ),
-        Tool(
             name="robinhood.options.positions",
             description="Get all open option positions for the account (strike, expiration, type, quantity, average price)",
             inputSchema={"type": "object", "properties": {}},
@@ -235,31 +123,6 @@ async def list_tools() -> List[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
-            name="robinhood.news.latest",
-            description="Get latest news for a stock symbol",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "Stock symbol to get news for (e.g., 'AAPL')",
-                    }
-                },
-                "required": ["symbol"],
-            },
-        ),
-        Tool(
-            name="robinhood.fundamentals.get",
-            description="Get fundamentals for a symbol",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string", "description": "Stock symbol"}
-                },
-                "required": ["symbol"],
-            },
-        ),
-        Tool(
             name="robinhood.auth.status",
             description="Check authentication status",
             inputSchema={"type": "object", "properties": {}},
@@ -271,49 +134,14 @@ async def list_tools() -> List[Tool]:
 async def call_tool(name: str, arguments: dict) -> List[TextContent]:
     """Handle tool calls."""
     assert client is not None, "Services not initialized. Call _init_services() first."
-    assert market_service is not None
     assert options_service is not None
     assert portfolio_service is not None
     assert watchlists_service is not None
-    assert news_service is not None
-    assert fundamentals_service is not None
 
     logger.debug("Tool called: %s", name)
 
     try:
-        if name == "robinhood.market.current_price":
-            symbols = arguments.get("symbols", [])
-            quotes = market_service.get_current_price(symbols)
-            return [
-                TextContent(
-                    type="text", text=json.dumps([q.model_dump() for q in quotes])
-                )
-            ]
-
-        elif name == "robinhood.market.price_history":
-            symbol = arguments["symbol"]
-            interval = arguments.get("interval", "hour")
-            span = arguments.get("span", "week")
-            bounds = arguments.get("bounds", "regular")
-            candles = market_service.get_price_history(symbol, interval, span, bounds)
-            return [
-                TextContent(
-                    type="text", text=json.dumps([c.model_dump() for c in candles])
-                )
-            ]
-
-        elif name == "robinhood.market.quote":
-            symbols = arguments.get("symbols", [])
-            quotes = market_service.get_current_price(
-                symbols
-            )  # Same as current_price for now
-            return [
-                TextContent(
-                    type="text", text=json.dumps([q.model_dump() for q in quotes])
-                )
-            ]
-
-        elif name == "robinhood.options.chain":
+        if name == "robinhood.options.chain":
             symbol = arguments["symbol"]
             expiration_date = arguments.get("expiration_date")
             option_type = arguments.get("option_type")
@@ -360,22 +188,6 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
                 TextContent(
                     type="text", text=json.dumps([w.model_dump() for w in watchlists])
                 )
-            ]
-
-        elif name == "robinhood.news.latest":
-            symbol = arguments["symbol"]
-            news = news_service.get_news(symbol)
-            return [
-                TextContent(
-                    type="text", text=json.dumps([n.model_dump() for n in news])
-                )
-            ]
-
-        elif name == "robinhood.fundamentals.get":
-            symbol = arguments["symbol"]
-            fundamentals = fundamentals_service.get_fundamentals(symbol)
-            return [
-                TextContent(type="text", text=json.dumps(fundamentals.model_dump()))
             ]
 
         elif name == "robinhood.auth.status":
