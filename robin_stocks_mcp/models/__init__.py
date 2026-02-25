@@ -4,6 +4,7 @@ from .portfolio import PortfolioSummary, Position
 from .watchlists import Watchlist
 from .news import NewsItem
 from .fundamentals import Fundamentals
+from .orders import CryptoOrder, OptionOrder, OrderExecution, OrderHistory, StockOrder
 
 __all__ = [
     "Quote",
@@ -15,4 +16,9 @@ __all__ = [
     "Watchlist",
     "NewsItem",
     "Fundamentals",
+    "OrderHistory",
+    "StockOrder",
+    "OptionOrder",
+    "CryptoOrder",
+    "OrderExecution",
 ]

@@ -112,6 +112,9 @@ pip install -e ".[dev]"
 ### Options
 - `robinhood.options.chain` - Get options chain for a symbol (calls and puts with greeks)
 
+### Orders
+- `robinhood.orders.history` - Get order history for stocks, options, and/or crypto (execution details, prices, timestamps)
+
 ### Portfolio
 - `robinhood.portfolio.summary` - Portfolio equity, cash, buying power, and day change
 - `robinhood.portfolio.positions` - Current positions with market value and unrealized P&L

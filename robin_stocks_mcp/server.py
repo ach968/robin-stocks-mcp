@@ -22,6 +22,7 @@ from robin_stocks_mcp.services import (
     FundamentalsService,
     NewsService,
     OptionsService,
+    OrdersService,
     PortfolioService,
     WatchlistsService,
 )
@@ -36,6 +37,7 @@ portfolio_service: PortfolioService  # type: ignore[assignment]
 watchlists_service: WatchlistsService  # type: ignore[assignment]
 news_service: NewsService  # type: ignore[assignment]
 fundamentals_service: FundamentalsService  # type: ignore[assignment]
+orders_service: OrdersService  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ def _init_services(
     allow_mfa: Optional[bool] = None,
 ):
     """Initialize client and services. Args override env vars."""
-    global client, market_service, options_service, portfolio_service, watchlists_service, news_service, fundamentals_service
+    global client, market_service, options_service, portfolio_service, watchlists_service, news_service, fundamentals_service, orders_service
 
     client = RobinhoodClient(
         username=username,
@@ -64,6 +66,7 @@ def _init_services(
     watchlists_service = WatchlistsService(client)
     news_service = NewsService(client)
     fundamentals_service = FundamentalsService(client)
+    orders_service = OrdersService(client)
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -249,6 +252,28 @@ async def list_tools() -> List[Tool]:
             description="Check authentication status",
             inputSchema={"type": "object", "properties": {}},
         ),
+        Tool(
+            name="robinhood.orders.history",
+            description="Get order history for stocks, options, and/or crypto. Returns past trades with execution details, prices, quantities, and timestamps.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "description": "Order type to retrieve: stock, option, crypto, or all (default: all)",
+                        "default": "all",
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "Filter by stock ticker symbol (applies to stock and option orders only)",
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date filter in YYYY-MM-DD format. Returns orders from this date to now.",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -390,6 +415,22 @@ async def call_tool(name: str, arguments: dict) -> List[TextContent]:
                         ),
                     )
                 ]
+
+        elif name == "robinhood.orders.history":
+            order_type = arguments.get("type", "all")
+            symbol = arguments.get("symbol")
+            start_date = arguments.get("start_date")
+            history = await asyncio.to_thread(
+                orders_service.get_order_history,
+                order_type,
+                symbol,
+                start_date,
+            )
+            return [
+                TextContent(
+                    type="text", text=json.dumps(history.model_dump())
+                )
+            ]
 
         else:
             return [
