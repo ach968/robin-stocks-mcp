@@ -151,7 +151,7 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="robinhood.market.quote",
-            description="Get detailed quote with previous close and change percent",
+            description="Get detailed stock quote for one or more symbols. Returns current price, previous close, change amount, and change percent. Use this instead of current_price when you need change/percent data.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -166,25 +166,39 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="robinhood.options.chain",
-            description="Get options chain for a symbol (calls and puts with greeks)",
+            description=(
+                "Get options chain for a symbol. This tool has TWO data tiers depending on whether strike_price is provided:\n\n"
+                "TIER 1 — Chain listing (strike_price OMITTED): Returns a list of option contracts near the money (±20%% of current price) "
+                "with basic instrument data: strike, type (call/put), expiration. Does NOT include bid/ask, Greeks, or market data. "
+                "This is fast — use it to browse available strikes.\n\n"
+                "TIER 2 — Targeted lookup (strike_price PROVIDED): Returns 1-2 contracts with FULL market data including: "
+                "bid/ask, mark price, last trade price, open interest, volume, implied volatility, all Greeks "
+                "(delta, gamma, theta, vega, rho), and chance of profit (long/short). This is the ONLY way to get Greeks from Robinhood.\n\n"
+                "RECOMMENDED WORKFLOW for agents:\n"
+                "  Step 1: Call with just symbol (and optionally expiration_date + option_type) to see available strikes.\n"
+                "  Step 2: Pick a strike from the results.\n"
+                "  Step 3: Call again with symbol + expiration_date + strike_price (+ option_type) to get full Greeks and market data.\n\n"
+                "IMPORTANT: If you need Greeks, bid/ask, or IV — you MUST provide strike_price. Without it you only get strike/type/expiration.\n"
+                "NOTE: expiration_date defaults to nearest available expiration if omitted."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "symbol": {
                         "type": "string",
-                        "description": "Stock ticker symbol",
+                        "description": "Stock ticker symbol (e.g., 'AAPL', 'TSLA')",
                     },
                     "expiration_date": {
                         "type": "string",
-                        "description": "Expiration date (YYYY-MM-DD). Uses nearest if omitted.",
+                        "description": "Expiration date in YYYY-MM-DD format. If omitted, defaults to the nearest available expiration. Required for targeted Greek lookups.",
                     },
                     "option_type": {
                         "type": "string",
-                        "description": "Option type: call or put",
+                        "description": "Filter by option type: 'call' or 'put'. If omitted, returns both calls and puts.",
                     },
                     "strike_price": {
                         "type": "string",
-                        "description": "Specific strike price for detailed greeks",
+                        "description": "Specific strike price (e.g., '150.00'). CRITICAL: When provided, switches to targeted lookup mode which returns full market data including bid/ask, Greeks (delta/gamma/theta/vega/rho), IV, and profit probability. Without this, only basic strike/type/expiration data is returned.",
                     },
                 },
                 "required": ["symbol"],
@@ -192,7 +206,12 @@ async def list_tools() -> List[Tool]:
         ),
         Tool(
             name="robinhood.options.positions",
-            description="Get all open option positions for the account (strike, expiration, type, quantity, average price)",
+            description=(
+                "Get all open option positions for the authenticated account. Returns each position with: "
+                "underlying symbol, strike price, expiration date, option type (call/put), direction (long/short), "
+                "quantity, and average cost basis. Does NOT include current Greeks or market data — use "
+                "robinhood.options.chain with the position's strike_price to get live Greeks and pricing."
+            ),
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
