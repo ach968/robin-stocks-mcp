@@ -15,9 +15,10 @@ A monorepo providing CLI and MCP access to the [robin-stocks](https://github.com
 ### CLI
 
 ```bash
-# Install
-cd robinhood-cli
-uv pip install -e .
+# Clone and install globally
+git clone https://github.com/ach968/robinhood-mcp.git
+cd robinhood-mcp
+uv tool install ./robinhood-cli
 
 # Login (prompts for username/password)
 rh login
