@@ -148,17 +148,17 @@ robinhood-mcp/            # MCP server
 - MCP accepts credentials via CLI args or environment variables
 - Passwords and tokens are never logged
 
-## Pi Agent Skill
+## Agent Skill
 
-A skill for the [pi coding agent](https://github.com/badlogic/pi-coding-agent) is included at [`skills/rh-cli.md`](skills/rh-cli.md). 
+A skill is included at [`skills/rh-cli.md`](skills/rh-cli.md). 
 
-To use it, copy to your pi skills directory:
+To use it, copy to your agent skills directory:
 ```bash
-mkdir -p ~/.pi/agent/skills/rh-cli
-cp skills/rh-cli.md ~/.pi/agent/skills/rh-cli/SKILL.md
+mkdir -p ~/.claude/skills/rh-cli
+cp skills/rh-cli.md ~/.claude/skills/rh-cli/SKILL.md
 ```
 
-After installing, pi will automatically suggest using `rh` commands when you ask about Robinhood data.
+After installing, your agent will automatically suggest using `rh` commands when you ask about Robinhood data.
 
 ## Disclaimer
 
